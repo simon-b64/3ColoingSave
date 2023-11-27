@@ -3,4 +3,4 @@ project(3coloring C)
 
 set(CMAKE_C_STANDARD 99)
 
-add_executable(3coloring main.c)
+add_executable(supervisor.c)
