@@ -184,17 +184,29 @@ static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
         if(sem_close(semaphoreCollection -> rSem) == -1) {
             printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
         }
+
+        if(sem_unlink(R_SEM_NAME) == -1) {
+            printStderrAndExit("[%s] ERROR: Failed to unlink semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        }
     }
 
     if(semaphoreCollection -> wSem != NULL) {
         if(sem_close(semaphoreCollection -> wSem) == -1) {
             printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
         }
+
+        if(sem_unlink(W_SEM_NAME) == -1) {
+            printStderrAndExit("[%s] ERROR: Failed to unlink semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        }
     }
 
     if(semaphoreCollection -> wSyncSem != NULL) {
         if(sem_close(semaphoreCollection -> wSyncSem) == -1) {
             printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+
+        if(sem_unlink(W_SEM_SYNC_NAME) == -1) {
+            printStderrAndExit("[%s] ERROR: Failed to unlink semaphores: %s\n", PROGRAM_NAME, strerror(errno));
         }
     }
 }
