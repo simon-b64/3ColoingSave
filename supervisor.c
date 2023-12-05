@@ -233,16 +233,16 @@ static semaphore_colleciton_t openSEM() {
 // Singnal handler
 
 static void handleSignal(int signal) {
-    if(signal == SIGINT || signal == SIGTERM) {
-        quitSignalRecieved = true;
-    }
+    quitSignalRecieved = true;
 }
 
 static void registerSignalHandler() {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handleSignal;
+    // TODO: Check if you should realy handle both
     sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -261,7 +261,11 @@ int main(int argc, char **argv) {
         sleep(programParameters.delay);
     }
     
-    while(!quitSignalRecieved) {}
+    long readCounter = 0;
+    while(!quitSignalRecieved && (programParameters.limit < 1 || readCounter < programParameters.limit)) {
+
+        ++readCounter;
+    }
 
     closeSHM(circularBufferData);
     closeSEM(&semaphoreCollection);

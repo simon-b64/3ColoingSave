@@ -1,5 +1,6 @@
 #ifndef COMMONS_H_FILE
 #define COMMONS_H_FILE
+
 // TODO: Change this prefix
 #define MAT_NUMMER_PREFIX "XXXX_"
 #define SHM_NAME MAT_NUMMER_PREFIX "SHM"
@@ -13,7 +14,7 @@
 #define MAX_NUM_EDGES_RESULT_SET 10
 
 typedef struct {
-    int resultSets[MAX_NUM_RESULT_SETS][MAX_NUM_EDGES_RESULT_SET][2];
+    long resultSets[MAX_NUM_RESULT_SETS][MAX_NUM_EDGES_RESULT_SET][2];
     int readPos;
     int writePos;
 } circular_buffer_data_t;

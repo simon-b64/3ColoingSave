@@ -32,7 +32,88 @@ static void printStderrAndExit(const char *output, ...) {
 // Util
 
 static void printUsageAndExit(void) {
-    printStderrAndExit("Usage: %s EDGE1...\n", PROGRAM_NAME);
+    printStderrAndExit("Usage: %s EDGE1...\nEdges: {node1}-{node2}", PROGRAM_NAME);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Argument parsing
+
+static long** parseArguments(int argc, char **argv) {
+    if(argc <= 1) {
+        printUsageAndExit();
+    }
+
+    long **buffer;
+    if((buffer = malloc(sizeof(long) * (argc - 1))) == NULL) {
+        printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+    }
+    for(int i = 0; i < (argc - 1); ++i) {
+        if((buffer[i] = malloc(sizeof(long) * 2)) == NULL) {
+            for(int x = 0; x < (argc - 1); ++x) {
+                free(buffer[x]);
+            } 
+            free(buffer);
+            printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
+
+    for(int i = 1; i < argc; ++i) {
+        char *numb = strtok(argv[i], "-");
+        if(numb == NULL) {
+            for(int x = 0; x < (argc - 1); ++x) {
+                free(buffer[x]);
+            } 
+            free(buffer);
+            printStderrAndExit("[%s] ERROR: Could not parse edge %d: %s\n", PROGRAM_NAME, i, argv[i]);
+        }
+        char *endptr = NULL;
+        buffer[i - 1][0] = strtol(numb, &endptr, 10);
+        if(buffer[i - 1][0] == LONG_MIN || buffer[i - 1][0] == LONG_MAX) {
+            if(errno == ERANGE) {
+                for(int x = 0; x < (argc - 1); ++x) {
+                    free(buffer[x]);
+                } 
+                free(buffer);
+                printStderrAndExit("[%s] ERROR: Converting long failed: %s\n", PROGRAM_NAME, strerror(errno));
+            }
+        }
+        if (endptr == optarg) {
+            for(int x = 0; x < (argc - 1); ++x) {
+                free(buffer[x]);
+            } 
+            free(buffer);
+            printStderrAndExit("[%s] ERROR: No digits were found in the first node: %s\n", PROGRAM_NAME, errno);
+        }
+
+        numb = strtok(NULL, "-");
+        if(numb == NULL) {
+            for(int x = 0; x < (argc - 1); ++x) {
+                free(buffer[x]);
+            } 
+            free(buffer);
+            printStderrAndExit("[%s] ERROR: Could not parse edge %d: %s\n", PROGRAM_NAME, i, argv[i]);
+        }
+        endptr = NULL;
+        buffer[i - 1][1] = strtol(numb, &endptr, 10);
+        if(buffer[i - 1][1] == LONG_MIN || buffer[i - 1][1] == LONG_MAX) {
+            if(errno == ERANGE) {
+                for(int x = 0; x < (argc - 1); ++x) {
+                    free(buffer[x]);
+                } 
+                free(buffer);
+                printStderrAndExit("[%s] ERROR: Converting long failed: %s\n", PROGRAM_NAME, strerror(errno));
+            }
+        }
+        if (endptr == optarg) {
+            for(int x = 0; x < (argc - 1); ++x) {
+                free(buffer[x]);
+            } 
+            free(buffer);
+            printStderrAndExit("[%s] ERROR: No digits were found in the first node: %s\n", PROGRAM_NAME, errno);
+        }
+    }
+    
+    return buffer;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -123,16 +204,16 @@ static semaphore_colleciton_t openSEM() {
 // Singnal handler
 
 static void handleSignal(int signal) {
-    if(signal == SIGINT || signal == SIGTERM) {
-        quitSignalRecieved = true;
-    }
+    quitSignalRecieved = true;
 }
 
 static void registerSignalHandler() {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handleSignal;
+    // TODO: Check if you should realy handle both
     sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -142,11 +223,14 @@ int main(int argc, char **argv) {
     registerSignalHandler();
     PROGRAM_NAME = argv[0];
 
-    // Inser argument parsing
+    long **edges = parseArguments(argc, argv);
 
     circular_buffer_data_t *circularBufferData = openSHM();
     semaphore_colleciton_t semaphoreCollection = openSEM();
 
+    for(int i = 0; i < argc - 1; i++) {
+        printf("[%ld %ld]\n", edges[i][0], edges[i][1]);
+    }
     // Insert Program logic
 
     while(!quitSignalRecieved) {}
@@ -154,6 +238,10 @@ int main(int argc, char **argv) {
     closeSHM(circularBufferData);
     closeSEM(&semaphoreCollection);
 
-    printUsageAndExit();
+    for(int x = 0; x < (argc - 1); ++x) {
+        free(edges[x]);
+    } 
+    free(edges);
+
     return EXIT_SUCCESS;
 }
