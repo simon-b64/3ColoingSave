@@ -7,6 +7,17 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include <limits.h>
+#include <getopt.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h> 
+
+// TODO: Change this prefix
+#define MAT_NUMMER_PREFIX "XXXX_"
+#define SHM_NAME MAT_NUMMER_PREFIX "SHM"
+#define R_SEM_NAME MAT_NUMMER_PREFIX "R_SEM"
+#define W_SEM_NAME MAT_NUMMER_PREFIX "W_SEM"
+#define W_SEM_SYNC_NAME MAT_NUMMER_PREFIX "W_SEM_SYNC"
 
 typedef struct {
     long limit;
@@ -111,6 +122,17 @@ static void parseArguments(int argc, char **argv) {
         fprintf(stderr, "[%s] ERROR: Too many arguments were passed!\n", PROGRAM_NAME);
         printUsageAndExit();
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Shared memory and semaphores
+
+static void openSHMandSEM() {
+    
+}
+
+static void closeSHMandSEM() {
+
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
