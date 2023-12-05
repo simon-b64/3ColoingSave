@@ -10,8 +10,8 @@
 #include <getopt.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <fcntl.h> 
-#include <semaphore.h>
+#include <fcntl.h>
+#include <signal.h>
 
 #include "commons.h"
 
@@ -21,14 +21,8 @@ typedef struct {
     bool printGraph;
 } program_parameters_t;
 
-
-typedef struct {
-    sem_t *rSem;
-    sem_t *wSem;
-    sem_t *wSyncSem;
-} semaphore_colleciton_t;
-
 static const char *PROGRAM_NAME;
+static bool quitSignalRecieved = false;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
@@ -236,10 +230,28 @@ static semaphore_colleciton_t openSEM() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Singnal handler
+
+static void handleSignal(int signal) {
+    if(signal == SIGINT || signal == SIGTERM) {
+        quitSignalRecieved = true;
+    }
+}
+
+static void registerSignalHandler() {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handleSignal;
+    sigaction(SIGINT, &sa, NULL);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Main
 
 int main(int argc, char **argv) {
+    registerSignalHandler();
     PROGRAM_NAME = argv[0];
+
     program_parameters_t programParameters = parseArguments(argc, argv);
 
     circular_buffer_data_t *circularBufferData = openSHM();
@@ -248,11 +260,11 @@ int main(int argc, char **argv) {
     if(programParameters.delay > 0) {
         sleep(programParameters.delay);
     }
+    
+    while(!quitSignalRecieved) {}
 
-    // Insert program logic
-
-    closeSEM(&semaphoreCollection);
     closeSHM(circularBufferData);
+    closeSEM(&semaphoreCollection);
 
     return EXIT_SUCCESS;
 }
