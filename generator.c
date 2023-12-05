@@ -11,11 +11,12 @@
 #include <sys/mman.h>
 #include <fcntl.h> 
 #include <signal.h>
+#include <time.h>
 
 #include "commons.h"
 
 const char *PROGRAM_NAME;
-static bool quitSignalRecieved = false;
+volatile sig_atomic_t quitSignalRecieved = false;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
@@ -44,7 +45,7 @@ static long** parseArguments(int argc, char **argv) {
     }
 
     long **buffer;
-    if((buffer = malloc(sizeof(long) * (argc - 1))) == NULL) {
+    if((buffer = malloc(sizeof(long*) * (argc - 1))) == NULL) {
         printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
     }
     for(int i = 0; i < (argc - 1); ++i) {
@@ -217,31 +218,145 @@ static void registerSignalHandler() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Cleanup
+
+static void cleanup(int argc, long **edges, size_t nodesSize, long **nodes, circular_buffer_data_t *circularBufferData, semaphore_colleciton_t *semaphoreCollection) {
+    if(edges != NULL) {
+        for(int x = 0; x < (argc - 1); ++x) {
+            free(edges[x]);
+            edges[x] = NULL;
+        } 
+        free(edges);
+        edges = NULL;
+    }
+
+    if(nodes != NULL) {
+        for(int x = 0; x < nodesSize; ++x) {
+            free(nodes[x]);
+            nodes[x] = NULL;
+        } 
+        free(nodes);
+        nodes = NULL;
+    }
+    
+    closeSHM(circularBufferData);
+    closeSEM(semaphoreCollection);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Main
 
 int main(int argc, char **argv) {
     registerSignalHandler();
     PROGRAM_NAME = argv[0];
+    srand(time(NULL));
 
     long **edges = parseArguments(argc, argv);
 
     circular_buffer_data_t *circularBufferData = openSHM();
     semaphore_colleciton_t semaphoreCollection = openSEM();
 
+    // TODO: Debug
     for(int i = 0; i < argc - 1; i++) {
         printf("[%ld %ld]\n", edges[i][0], edges[i][1]);
     }
-    // Insert Program logic
 
-    while(!quitSignalRecieved) {}
+    long** nodes;
+    size_t nodesSize = 16;
+    if((nodes = malloc(sizeof(long*) * nodesSize)) == NULL) {
+        cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+        printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+    }
+    for(int i = 0; i < nodesSize; ++i) {
+        nodes[i] = NULL;
+    }
 
-    closeSHM(circularBufferData);
-    closeSEM(&semaphoreCollection);
+    for(int i = 0; i < argc - 1; ++i) {
+        for(int a = 0; a < 2; ++a) {
+            int x;
+            for(x = 0; x < nodesSize; ++x) {
+                if(nodes[x] == NULL) {
+                    if((nodes[x] = malloc(sizeof(long) * 2)) == NULL) {
+                        cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+                        printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+                    }
+                    nodes[x][0] = edges[i][a];
+                    nodes[x][1] = 0;
+                    break;
+                } else if(nodes[x][0] == edges[x][a]) {
+                    break;
+                }
+            }
+            if(x == nodesSize) {
+                nodesSize *= 2;
+                if((nodes = realloc(nodes, sizeof(long*) * nodesSize)) == NULL) {
+                    cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+                    printStderrAndExit("[%s] ERROR: Failed to reallocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+                }
+                for(int y = nodesSize / 2; y < nodesSize; ++y) {
+                    nodes[y] = NULL;
+                }
+                if((nodes[nodesSize / 2] = malloc(sizeof(long) * 2)) == NULL) {
+                    cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+                    printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+                }
+                nodes[nodesSize / 2][0] = edges[i][a];
+                nodes[nodesSize / 2][1] = 0;
+            }
+        }
+    }
 
-    for(int x = 0; x < (argc - 1); ++x) {
-        free(edges[x]);
-    } 
-    free(edges);
+    while(!quitSignalRecieved) {
+        for(int i = 0; i < nodesSize; ++i) {
+            if(nodes[i] != NULL) {
+                nodes[i][1] = (rand() % 3) + 1;
+            }
+        }
+
+        // TODO: Debug
+        for(int i = 0; i < nodesSize; i++) {
+            if(nodes[i] != NULL) {
+                printf("Node [%ld %ld]\n", nodes[i][0], nodes[i][1]);
+            }
+        }
+
+        for(int i = 0; i < (argc - 1); ++i) {
+            int index1 = -1;
+            int index2 = -1;
+            for(int x = 0; x < nodesSize; ++x) {
+                if(nodes[x] == NULL) {
+                    break;
+                }
+                if(nodes[x][0] == edges[i][0]) {
+                    index1 = x;
+                }
+                if(nodes[x][0] == edges[i][1]) {
+                    index2 = x;
+                }
+                if(index1 != -1 && index2 != -1) {
+                    break;
+                }
+            }
+
+            if(index1 == -1 || index2 == -1) {
+                cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+                printStderrAndExit("[%s] ERROR: There is an unmapped node!\n", PROGRAM_NAME);
+            }
+
+            if(nodes[index1][1] == nodes[index2][1]){
+                // Write these edges to an result array
+                printf("TBR: [%ld %ld]\n", edges[i][0], edges[i][1]);
+            }
+        }
+
+        // Write the result array to the buffer
+        
+        // Continue until supervisor says to stop
+        break;
+
+    }
+
+    cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
 
     return EXIT_SUCCESS;
 }

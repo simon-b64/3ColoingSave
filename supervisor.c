@@ -221,7 +221,7 @@ static semaphore_colleciton_t openSEM() {
         printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
     }
 
-    if((semaphoreCollection.wSyncSem = sem_open(W_SEM_SYNC_NAME, O_CREAT | O_EXCL, 0600, 0)) == SEM_FAILED) {
+    if((semaphoreCollection.wSyncSem = sem_open(W_SEM_SYNC_NAME, O_CREAT | O_EXCL, 0600, 1)) == SEM_FAILED) {
         closeSEM(&semaphoreCollection);
         printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
     }
