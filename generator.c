@@ -11,13 +11,7 @@
 #include <sys/mman.h>
 #include <fcntl.h> 
 
-// TODO: Change this prefix
-// TODO: Maybe move this into headder file
-#define MAT_NUMMER_PREFIX "XXXX_"
-#define SHM_NAME MAT_NUMMER_PREFIX "SHM"
-#define R_SEM_NAME MAT_NUMMER_PREFIX "R_SEM"
-#define W_SEM_NAME MAT_NUMMER_PREFIX "W_SEM"
-#define W_SEM_SYNC_NAME MAT_NUMMER_PREFIX "W_SEM_SYNC"
+#include "commons.h"
 
 const char *PROGRAM_NAME;
 

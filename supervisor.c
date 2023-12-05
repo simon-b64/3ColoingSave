@@ -11,27 +11,24 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h> 
+#include <semaphore.h>
 
-// TODO: Change this prefix
-#define MAT_NUMMER_PREFIX "XXXX_"
-#define SHM_NAME MAT_NUMMER_PREFIX "SHM"
-#define R_SEM_NAME MAT_NUMMER_PREFIX "R_SEM"
-#define W_SEM_NAME MAT_NUMMER_PREFIX "W_SEM"
-#define W_SEM_SYNC_NAME MAT_NUMMER_PREFIX "W_SEM_SYNC"
+#include "commons.h"
 
 typedef struct {
     long limit;
     long delay;
-    bool p;
+    bool printGraph;
 } program_parameters_t;
 
-const char *PROGRAM_NAME;
 
-static program_parameters_t programParameters = {
-        -1,
-        -1,
-        false,
-};
+typedef struct {
+    sem_t *rSem;
+    sem_t *wSem;
+    sem_t *wSyncSem;
+} semaphore_colleciton_t;
+
+static const char *PROGRAM_NAME;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
@@ -54,9 +51,14 @@ static void printUsageAndExit(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Argument parsing
 
-static void parseArguments(int argc, char **argv) {
+static program_parameters_t parseArguments(int argc, char **argv) {
+    program_parameters_t programParameters = {
+        -1,
+        -1,
+        false,
+    };
     int option;
-    while ((option = getopt(argc, argv, ":n:w:p ")) != -1) {
+    while ((option = getopt(argc, argv, ":n:w:p")) != -1) {
         switch (option) {
             case 'n':
                 if (programParameters.limit != -1) {
@@ -100,11 +102,11 @@ static void parseArguments(int argc, char **argv) {
                 }
                 break;
             case 'p':
-                if (programParameters.p) {
-                    fprintf(stderr, "[%s] ERROR: multiple -p parameters were passed!\n", PROGRAM_NAME);
+                if (programParameters.printGraph) {
+                    fprintf(stderr, "[%s] ERROR: Multiple -p parameters were passed!\n", PROGRAM_NAME);
                     printUsageAndExit();
                 }
-                programParameters.p = true;
+                programParameters.printGraph = true;
                 break;
             case ':':
                 fprintf(stderr, "[%s] ERROR: Option -%c requires a value!\n", PROGRAM_NAME, optopt);
@@ -112,7 +114,7 @@ static void parseArguments(int argc, char **argv) {
                 break;
             case '?':
             default:
-                fprintf(stderr, "[%s] ERROR: Unknown option: %c\n", PROGRAM_NAME, optopt);
+                fprintf(stderr, "[%s] ERROR: Unkn#include <semaphore.h>own option: -%c\n", PROGRAM_NAME, optopt);
                 printUsageAndExit();
                 break;
         }
@@ -122,17 +124,103 @@ static void parseArguments(int argc, char **argv) {
         fprintf(stderr, "[%s] ERROR: Too many arguments were passed!\n", PROGRAM_NAME);
         printUsageAndExit();
     }
+
+    return programParameters;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Shared memory and semaphores
+// Shared memory
 
-static void openSHMandSEM() {
+static void closeSHM(circular_buffer_data_t* circularBufferData) {
+    if(circularBufferData != NULL) {
+        if(munmap(circularBufferData, sizeof(circular_buffer_data_t)) == -1) {
+            printStderrAndExit("[%s] ERROR: Failed to unmap shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
     
+    if(shm_unlink(SHM_NAME) == -1) {
+        if(errno != ENOENT) {
+            printStderrAndExit("[%s] ERROR: Failed to unlink shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
 }
 
-static void closeSHMandSEM() {
+static circular_buffer_data_t* openSHM() {
+    int sharedMemoryFd;
+    if((sharedMemoryFd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0600)) == -1) {
+        printStderrAndExit("[%s] ERROR: Failed to open shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+    }
 
+    if (ftruncate(sharedMemoryFd, sizeof(circular_buffer_data_t)) < 0) {
+        fprintf(stderr, "[%s] ERROR: Failed to truncate shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+        closeSHM(NULL);
+        exit(EXIT_FAILURE);
+    }
+    circular_buffer_data_t *circularBufferData;
+    circularBufferData = mmap(NULL, sizeof(circular_buffer_data_t), PROT_READ | PROT_WRITE, MAP_SHARED, sharedMemoryFd, 0);
+
+    if(circularBufferData == MAP_FAILED) {
+        fprintf(stderr, "[%s] ERROR: Failed to map shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+        closeSHM(NULL);
+        exit(EXIT_FAILURE);
+    }
+
+    if(close(sharedMemoryFd) == -1) {
+        fprintf(stderr, "[%s] ERROR: Failed to close shared memory file descriptor: %s\n", PROGRAM_NAME, strerror(errno));
+        closeSHM(circularBufferData);
+        exit(EXIT_FAILURE);
+    }
+
+    return circularBufferData;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Semaphores
+
+static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
+    // TODO: This has a problem: Whe one close fails it doesnt close the other ones!!!
+
+    if(semaphoreCollection -> rSem != NULL) {
+        if(sem_close(semaphoreCollection -> rSem) == -1) {
+            printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
+
+    if(semaphoreCollection -> wSem != NULL) {
+        if(sem_close(semaphoreCollection -> wSem) == -1) {
+            printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
+
+    if(semaphoreCollection -> wSyncSem != NULL) {
+        if(sem_close(semaphoreCollection -> wSyncSem) == -1) {
+            printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
+}
+
+static semaphore_colleciton_t openSEM() {
+    semaphore_colleciton_t semaphoreCollection = {
+        NULL,
+        NULL,
+        NULL,
+    };
+
+    if((semaphoreCollection.rSem = sem_open(R_SEM_NAME, O_CREAT | O_EXCL, 0600, 0)) == SEM_FAILED) {
+        printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+    }
+
+    if((semaphoreCollection.wSem = sem_open(W_SEM_NAME, O_CREAT | O_EXCL, 0600, MAX_NUM_RESULT_SETS)) == SEM_FAILED) {
+        closeSEM(&semaphoreCollection);
+        printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+    }
+
+    if((semaphoreCollection.wSyncSem = sem_open(W_SEM_SYNC_NAME, O_CREAT | O_EXCL, 0600, 0)) == SEM_FAILED) {
+        closeSEM(&semaphoreCollection);
+        printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+    }
+
+    return semaphoreCollection;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -140,14 +228,19 @@ static void closeSHMandSEM() {
 
 int main(int argc, char **argv) {
     PROGRAM_NAME = argv[0];
-    parseArguments(argc, argv);
+    program_parameters_t programParameters = parseArguments(argc, argv);
 
-    // Initialise shared memory, semaphores and cricular buffer
+    circular_buffer_data_t *circularBufferData = openSHM();
+    semaphore_colleciton_t semaphoreCollection = openSEM();
 
     if(programParameters.delay > 0) {
         sleep(programParameters.delay);
     }
 
+    // Insert program logic
+
+    closeSEM(&semaphoreCollection);
+    closeSHM(circularBufferData);
 
     return EXIT_SUCCESS;
 }
