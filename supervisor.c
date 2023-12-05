@@ -52,14 +52,15 @@ static void parseArguments(int argc, char **argv) {
                     fprintf(stderr, "[%s] ERROR: multiple limit parameters were passed!\n", PROGRAM_NAME);
                     printUsageAndExit();
                 }
-                char *endptr;
-                programParameters.limit = strtol(optarg, &endptr, 10);
+                // maybe move out of this scope to not have 1 & 2
+                char *endptr1;
+                programParameters.limit = strtol(optarg, &endptr1, 10);
                 if(programParameters.limit == LONG_MIN || programParameters.limit == LONG_MAX) {
                     if(errno == ERANGE) {
                         printStderrAndExit("[%s] ERROR: Converting integer failed: %s\n", PROGRAM_NAME, strerror(errno));
                     }
                 }
-                if (endptr == optarg) {
+                if (endptr1 == optarg) {
                     printStderrAndExit("[%s] ERROR: No digits were found in the input string for limit!\n", PROGRAM_NAME);
                 }
                 if(programParameters.limit < 0) {
@@ -72,14 +73,14 @@ static void parseArguments(int argc, char **argv) {
                     fprintf(stderr, "[%s] ERROR: multiple wait parameters were passed!\n", PROGRAM_NAME);
                     printUsageAndExit();
                 }
-                char *endptr;
-                programParameters.delay = strtol(optarg, &optarg, 10);
+                char *endptr2;
+                programParameters.delay = strtol(optarg, &endptr2, 10);
                 if(programParameters.delay == LONG_MIN || programParameters.delay == LONG_MAX) {
                     if(errno == ERANGE) {
                         printStderrAndExit("[%s] ERROR: Converting integer failed: %s\n", PROGRAM_NAME, strerror(errno));
                     }
                 }
-                if (endptr == optarg) {
+                if (endptr2 == optarg) {
                     printStderrAndExit("[%s] ERROR: No digits were found in the input string for wait!\n", PROGRAM_NAME);
                 }
                 if(programParameters.delay < 0) {
@@ -119,6 +120,11 @@ int main(int argc, char **argv) {
     PROGRAM_NAME = argv[0];
     parseArguments(argc, argv);
 
+    // Initialise shared memory, semaphores and cricular buffer
+
+    if(programParameters.delay > 0) {
+        sleep(programParameters.delay);
+    }
 
 
     return EXIT_SUCCESS;
