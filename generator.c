@@ -128,7 +128,7 @@ static void closeSHM(circular_buffer_data_t* circularBufferData) {
     }
 }
 
-static circular_buffer_data_t* openSHM() {
+static circular_buffer_data_t* openSHM(void) {
     int sharedMemoryFd;
     if((sharedMemoryFd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0600)) == -1) {
         printStderrAndExit("[%s] ERROR: Failed to open shared memory: %s\n", PROGRAM_NAME, strerror(errno));
@@ -177,7 +177,7 @@ static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
     }
 }
 
-static semaphore_colleciton_t openSEM() {
+static semaphore_colleciton_t openSEM(void) {
     semaphore_colleciton_t semaphoreCollection = {
         NULL,
         NULL,
@@ -208,7 +208,7 @@ static void handleSignal(int signal) {
     quitSignalRecieved = true;
 }
 
-static void registerSignalHandler() {
+static void registerSignalHandler(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handleSignal;

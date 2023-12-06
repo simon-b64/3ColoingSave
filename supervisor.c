@@ -22,7 +22,14 @@ typedef struct {
 } program_parameters_t;
 
 static const char *PROGRAM_NAME;
-static bool quitSignalRecieved = false;
+volatile sig_atomic_t quitSignalRecieved = false;
+
+// TODO:
+// Write useful coments
+// Doxygen documentation
+// Check if you reinvent the wheel somewhere
+// NAME OF CONSTANTS IN UPPERCASE
+// Use meaningful variable and constant names
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
@@ -139,7 +146,7 @@ static void closeSHM(circular_buffer_data_t* circularBufferData) {
     }
 }
 
-static circular_buffer_data_t* openSHM() {
+static circular_buffer_data_t* openSHM(void) {
     int sharedMemoryFd;
     if((sharedMemoryFd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0600)) == -1) {
         printStderrAndExit("[%s] ERROR: Failed to open shared memory: %s\n", PROGRAM_NAME, strerror(errno));
@@ -215,7 +222,7 @@ static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
     }
 }
 
-static semaphore_colleciton_t openSEM() {
+static semaphore_colleciton_t openSEM(void) {
     semaphore_colleciton_t semaphoreCollection = {
         NULL,
         NULL,
@@ -246,7 +253,7 @@ static void handleSignal(int signal) {
     quitSignalRecieved = true;
 }
 
-static void registerSignalHandler() {
+static void registerSignalHandler(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handleSignal;
@@ -259,7 +266,21 @@ static void registerSignalHandler() {
 // Cleanup
 
 static void cleanup(circular_buffer_data_t *circularBufferData, semaphore_colleciton_t *semaphoreCollection) {
-    // SEND SIGNAL TO STOP ALL GENERATORS
+    circularBufferData -> stopGenerators = true;
+    int semValue = 0;
+    while(semValue < MAX_NUM_RESULT_SETS) {
+        if(sem_getvalue(semaphoreCollection -> wSem, &semValue) == -1) {
+            closeSHM(circularBufferData);
+            closeSEM(semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error reading the value of a semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+        
+        if(sem_post(semaphoreCollection -> wSem) == -1) {
+            closeSHM(circularBufferData);
+            closeSEM(semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
 
     closeSHM(circularBufferData);
     closeSEM(semaphoreCollection);
@@ -333,19 +354,6 @@ int main(int argc, char **argv) {
         printf("The graph might not be 3-colorable, best solution removes %d edges.\n", numberOfEdgesInBestResult);
     }
 
-    circularBufferData -> stopGenerators = true;
-    int semValue = 0;
-    while(semValue < MAX_NUM_RESULT_SETS) {
-        if(sem_getvalue(semaphoreCollection.wSem, &semValue) == -1) {
-            cleanup(circularBufferData, &semaphoreCollection);
-            printStderrAndExit("[%s] ERROR: There was an error reading the value of a semaphore: %s\n", PROGRAM_NAME, strerror(errno));
-        }
-        
-        if(sem_post(semaphoreCollection.wSem) == -1) {
-            cleanup(circularBufferData, &semaphoreCollection);
-            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
-        }
-    }
     cleanup(circularBufferData, &semaphoreCollection);
 
     return EXIT_SUCCESS;
