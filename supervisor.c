@@ -165,6 +165,16 @@ static circular_buffer_data_t* openSHM() {
         exit(EXIT_FAILURE);
     }
 
+    circularBufferData -> readPos = 0;
+    circularBufferData -> writePos = 0;
+    circularBufferData -> stopGenerators = false;
+    for(int i = 0; i < MAX_NUM_RESULT_SETS; ++i) {
+        for(int x = 0; x < MAX_NUM_EDGES_RESULT_SET; ++x) {
+            circularBufferData -> resultSets[i][x][0] = -1;
+            circularBufferData -> resultSets[i][x][1] = -1;
+        }
+    }
+
     return circularBufferData;
 }
 
@@ -246,6 +256,16 @@ static void registerSignalHandler() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Cleanup
+
+static void cleanup(circular_buffer_data_t *circularBufferData, semaphore_colleciton_t *semaphoreCollection) {
+    // SEND SIGNAL TO STOP ALL GENERATORS
+
+    closeSHM(circularBufferData);
+    closeSEM(semaphoreCollection);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Main
 
 int main(int argc, char **argv) {
@@ -262,13 +282,71 @@ int main(int argc, char **argv) {
     }
     
     long readCounter = 0;
+    long bestResultSet[MAX_NUM_EDGES_RESULT_SET][2];
+    int numberOfEdgesInBestResult = MAX_NUM_EDGES_RESULT_SET + 1;
     while(!quitSignalRecieved && (programParameters.limit < 1 || readCounter < programParameters.limit)) {
+        if(sem_wait(semaphoreCollection.rSem) == -1) {
+            if(errno == EINTR) {
+                continue;
+            }
+            cleanup(circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error waiting for the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+
+        int numberOfEdgesInResult = 0;
+        for(int i = 0; i < MAX_NUM_EDGES_RESULT_SET && circularBufferData -> resultSets[circularBufferData -> readPos][i][0] != -1; i++) {
+            numberOfEdgesInResult++;
+        }
+
+        if(numberOfEdgesInResult == 0) {
+            numberOfEdgesInBestResult = 0;
+            break;
+        }
+
+        if(numberOfEdgesInResult < numberOfEdgesInBestResult) {
+            for(int i = 0; i < MAX_NUM_EDGES_RESULT_SET; ++i) {
+                bestResultSet[i][0] = circularBufferData -> resultSets[circularBufferData -> readPos][i][0];
+                bestResultSet[i][1] = circularBufferData -> resultSets[circularBufferData -> readPos][i][1];
+            }
+            numberOfEdgesInBestResult = numberOfEdgesInResult;
+
+            fprintf(stderr, "New best result found:\n");
+            for(int i = 0; i < MAX_NUM_EDGES_RESULT_SET && bestResultSet[i][0] != -1; ++i) {
+                fprintf(stderr, "[%ld, %ld]\n", bestResultSet[i][0], bestResultSet[i][1]);
+            }
+        }
+
+        circularBufferData -> readPos = circularBufferData -> readPos + 1;
+        circularBufferData -> readPos = circularBufferData -> readPos % MAX_NUM_RESULT_SETS;
+
+        if(sem_post(semaphoreCollection.wSem) == -1) {
+            cleanup(circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
 
         ++readCounter;
     }
 
-    closeSHM(circularBufferData);
-    closeSEM(&semaphoreCollection);
+    if(numberOfEdgesInBestResult == 0) {
+        printf("The graph is 3-colorable!\n");
+    } else {
+        printf("The graph might not be 3-colorable, best solution removes %d edges.\n", numberOfEdgesInBestResult);
+    }
+
+    circularBufferData -> stopGenerators = true;
+    int semValue = 0;
+    while(semValue < MAX_NUM_RESULT_SETS) {
+        if(sem_getvalue(semaphoreCollection.wSem, &semValue) == -1) {
+            cleanup(circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error reading the value of a semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+        
+        if(sem_post(semaphoreCollection.wSem) == -1) {
+            cleanup(circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+    }
+    cleanup(circularBufferData, &semaphoreCollection);
 
     return EXIT_SUCCESS;
 }

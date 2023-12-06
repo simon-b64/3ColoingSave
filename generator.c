@@ -256,11 +256,6 @@ int main(int argc, char **argv) {
     circular_buffer_data_t *circularBufferData = openSHM();
     semaphore_colleciton_t semaphoreCollection = openSEM();
 
-    // TODO: Debug
-    for(int i = 0; i < argc - 1; i++) {
-        printf("[%ld %ld]\n", edges[i][0], edges[i][1]);
-    }
-
     long** nodes;
     size_t nodesSize = 16;
     if((nodes = malloc(sizeof(long*) * nodesSize)) == NULL) {
@@ -283,10 +278,11 @@ int main(int argc, char **argv) {
                     nodes[x][0] = edges[i][a];
                     nodes[x][1] = 0;
                     break;
-                } else if(nodes[x][0] == edges[x][a]) {
+                } else if(nodes[x][0] == edges[i][a]) {
                     break;
                 }
             }
+
             if(x == nodesSize) {
                 nodesSize *= 2;
                 if((nodes = realloc(nodes, sizeof(long*) * nodesSize)) == NULL) {
@@ -306,20 +302,23 @@ int main(int argc, char **argv) {
         }
     }
 
-    while(!quitSignalRecieved) {
+    while(!quitSignalRecieved && !circularBufferData -> stopGenerators) {
+        // Generate a random coloring
         for(int i = 0; i < nodesSize; ++i) {
             if(nodes[i] != NULL) {
                 nodes[i][1] = (rand() % 3) + 1;
             }
         }
 
-        // TODO: Debug
-        for(int i = 0; i < nodesSize; i++) {
-            if(nodes[i] != NULL) {
-                printf("Node [%ld %ld]\n", nodes[i][0], nodes[i][1]);
-            }
+        // Generate a buffer in which to write the edges to remove
+        long edgesToRemove[MAX_NUM_EDGES_RESULT_SET][2];
+        for(int i = 0; i < MAX_NUM_EDGES_RESULT_SET; ++i) {
+            edgesToRemove[i][0] = -1;
+            edgesToRemove[i][1] = -1;
         }
 
+        // Find out which edges to remove and add them to buffer
+        int edgeIndex = 0;
         for(int i = 0; i < (argc - 1); ++i) {
             int index1 = -1;
             int index2 = -1;
@@ -339,21 +338,62 @@ int main(int argc, char **argv) {
             }
 
             if(index1 == -1 || index2 == -1) {
+                // ERROR out since this should never happen
                 cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
                 printStderrAndExit("[%s] ERROR: There is an unmapped node!\n", PROGRAM_NAME);
             }
 
             if(nodes[index1][1] == nodes[index2][1]){
-                // Write these edges to an result array
-                printf("TBR: [%ld %ld]\n", edges[i][0], edges[i][1]);
+                if(edgeIndex < MAX_NUM_EDGES_RESULT_SET) {
+                    edgesToRemove[edgeIndex][0] = edges[i][0];
+                    edgesToRemove[edgeIndex][1] = edges[i][1];
+                    ++edgeIndex;
+                }
             }
         }
 
-        // Write the result array to the buffer
+        // Continue searching since the result is too large
+        if(edgeIndex >= MAX_NUM_EDGES_RESULT_SET) {
+            continue;
+        }
         
-        // Continue until supervisor says to stop
-        break;
+        if(sem_wait(semaphoreCollection.wSyncSem) == -1) {
+            if(errno == EINTR) {
+                continue;
+            }
+            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error waiting the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
 
+        if(sem_wait(semaphoreCollection.wSem) == -1) {
+            if(sem_post(semaphoreCollection.wSyncSem) == -1) {
+                cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+                printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+            }
+            if(errno == EINTR) {   
+                continue;
+            }
+            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error waiting the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+
+        for(int i = 0; i < MAX_NUM_EDGES_RESULT_SET; ++i) {
+            circularBufferData -> resultSets[circularBufferData -> writePos][i][0] = edgesToRemove[i][0];
+            circularBufferData -> resultSets[circularBufferData -> writePos][i][1] = edgesToRemove[i][1];
+        }
+
+        circularBufferData -> writePos = circularBufferData -> writePos + 1;
+        circularBufferData -> writePos = circularBufferData -> writePos % MAX_NUM_RESULT_SETS;
+
+        if(sem_post(semaphoreCollection.rSem) == -1) {
+            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
+
+        if(sem_post(semaphoreCollection.wSyncSem) == -1) {
+            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+        }
     }
 
     cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);

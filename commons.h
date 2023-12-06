@@ -17,6 +17,7 @@ typedef struct {
     long resultSets[MAX_NUM_RESULT_SETS][MAX_NUM_EDGES_RESULT_SET][2];
     int readPos;
     int writePos;
+    bool stopGenerators;
 } circular_buffer_data_t;
 
 typedef struct {
