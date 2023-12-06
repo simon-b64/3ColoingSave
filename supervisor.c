@@ -1,3 +1,16 @@
+/**
+ * @file supervisor.c
+ * @author Simon Buchinger 12220026 <e12220026@student.tuwien.ac.at>
+ * @date 27.11.2023
+ * @program: 3coloring
+ * 
+ * @brief Main-file of the supervisor program
+ * @details The supervisor will open a circular buffer in shared memory and three semaphores,
+ *          enabling the generators to write their solutions to the three coloring problem into the buffer.
+ *          The supervisor will read these solutions until a perfect one is found or a quit condition is reached.
+ *
+ **/
+
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -15,13 +28,26 @@
 
 #include "commons.h"
 
+/**
+ * Program parameters struct
+ * @brief Stores all parameters passed to the program
+ */
 typedef struct {
     long limit;
     long delay;
     bool printGraph;
 } program_parameters_t;
 
+/**
+ * Program name
+ * @brief Pointer to the program name string
+ */
 static const char *PROGRAM_NAME;
+
+/**
+ * Quit signal recieved
+ * @brief Boolean to store if a quit singnal was recieved. Has to be completely asynchronous save.
+ */
 volatile sig_atomic_t quitSignalRecieved = false;
 
 // TODO:
@@ -34,6 +60,14 @@ volatile sig_atomic_t quitSignalRecieved = false;
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
 
+/**
+ * Loggin function for errors
+ * 
+ * @brief This function writes a given formatted message to stderr and exits with EXIT_FAILURE
+ * 
+ * @param output Formatted output string
+ * @param ... Fomat elements
+ */
 static void printStderrAndExit(const char *output, ...) {
     va_list args;
     va_start(args, output);
@@ -45,6 +79,12 @@ static void printStderrAndExit(const char *output, ...) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Util
 
+/**
+ * Mandatory usage function
+ * 
+ * @brief This function writes helpful usage information about the program to stderr and exits with EXIT_FAILURE
+ * @details global variables: PROGRAM_NAME 
+ */
 static void printUsageAndExit(void) {
     printStderrAndExit("Usage: %s [-n limit] [-w delay] [-p]\n", PROGRAM_NAME);
 }
@@ -52,6 +92,16 @@ static void printUsageAndExit(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Argument parsing
 
+/**
+ * Parse arguments function
+ * 
+ * @brief This function parses the arguments given to the program via argc and argv. If something is not right it prints an eror message and exits with EXIT_FAILURE
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @param argc The argument counter
+ * @param argv The argument vector
+ * @return An initialised program_parametes_t struct with the parsed argument values
+ */
 static program_parameters_t parseArguments(int argc, char **argv) {
     program_parameters_t programParameters = {
         -1,
@@ -132,6 +182,12 @@ static program_parameters_t parseArguments(int argc, char **argv) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Shared memory
 
+/**
+ * @brief Umaps the shared memory circular buffer and unlinks the shared memory
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @param circularBufferData pointer to the mapped shared memory circular buffer
+ */
 static void closeSHM(circular_buffer_data_t* circularBufferData) {
     if(circularBufferData != NULL) {
         if(munmap(circularBufferData, sizeof(circular_buffer_data_t)) == -1) {
@@ -146,6 +202,14 @@ static void closeSHM(circular_buffer_data_t* circularBufferData) {
     }
 }
 
+/**
+ * @brief Opens a shared memory space, trucates it to the size of the circular_buffer_data_t object, 
+ *        maps it to a variable, closes the fileDescriptor, intialises the circular buffer object and returns a pointer to that object.
+ *        If something fails it closes already open resources and outputs an error.
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @return A pointer to the mapped shared memory circular buffer
+ */
 static circular_buffer_data_t* openSHM(void) {
     int sharedMemoryFd;
     if((sharedMemoryFd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0600)) == -1) {
@@ -188,6 +252,12 @@ static circular_buffer_data_t* openSHM(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Semaphores
 
+/**
+ * @brief Closes and unlinks the open semaphores given with semaphoreCollection
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
+ */
 static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
     // TODO: This has a problem: Whe one close fails it doesnt close the other ones!!!
 
@@ -222,7 +292,14 @@ static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
     }
 }
 
+/**
+ * @brief Creates and opens all neccessary semaphores and returns a collection of these semaphores as a semphore_collection_t object.
+ *        If something fails it automatically closes the semaphores and prints an error.
+ * 
+ * @return A collection of the opened semaphores as a semphore_collection_t object.
+ */
 static semaphore_colleciton_t openSEM(void) {
+    // TODO: Doesnt close shared memory
     semaphore_colleciton_t semaphoreCollection = {
         NULL,
         NULL,
@@ -249,10 +326,19 @@ static semaphore_colleciton_t openSEM(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Singnal handler
 
+/**
+ * @brief Function to handle singals
+ * 
+ * @param signal Signal that is being handles
+ */
 static void handleSignal(int signal) {
     quitSignalRecieved = true;
 }
 
+/**
+ * @brief Registers the signal handler for SIGINT and SIGTERM
+ * 
+ */
 static void registerSignalHandler(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -265,6 +351,13 @@ static void registerSignalHandler(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Cleanup
 
+/**
+ * @brief Cleans up everything there is to clean up.
+ *        It stops the generators and closes the shared memory as well as the semaphores
+ * 
+ * @param circularBufferData pointer to the mapped shared memory circular buffer
+ * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
+ */
 static void cleanup(circular_buffer_data_t *circularBufferData, semaphore_colleciton_t *semaphoreCollection) {
     circularBufferData -> stopGenerators = true;
     int semValue = 0;
@@ -289,6 +382,13 @@ static void cleanup(circular_buffer_data_t *circularBufferData, semaphore_collec
 // ---------------------------------------------------------------------------------------------------------------------
 // Main
 
+/**
+ * @brief Program entry point
+ * 
+ * @param argc The argument counter
+ * @param argv The argument vector
+ * @return Returns EXIT_SUCCESS on program success
+ */
 int main(int argc, char **argv) {
     registerSignalHandler();
     PROGRAM_NAME = argv[0];
@@ -298,6 +398,7 @@ int main(int argc, char **argv) {
     circular_buffer_data_t *circularBufferData = openSHM();
     semaphore_colleciton_t semaphoreCollection = openSEM();
 
+    // Wait if the delay is set
     if(programParameters.delay > 0) {
         sleep(programParameters.delay);
     }
@@ -319,11 +420,13 @@ int main(int argc, char **argv) {
             numberOfEdgesInResult++;
         }
 
+        // Break the loop if the result set is empty so the graph is three colorable
         if(numberOfEdgesInResult == 0) {
             numberOfEdgesInBestResult = 0;
             break;
         }
 
+        // Save the new better result if it is better
         if(numberOfEdgesInResult < numberOfEdgesInBestResult) {
             for(int i = 0; i < MAX_NUM_EDGES_RESULT_SET; ++i) {
                 bestResultSet[i][0] = circularBufferData -> resultSets[circularBufferData -> readPos][i][0];

@@ -1,3 +1,16 @@
+/**
+ * @file generator.c
+ * @author Simon Buchinger 12220026 <e12220026@student.tuwien.ac.at>
+ * @date 27.11.2023
+ * @program: 3coloring
+ * 
+ * @brief Main-file of the generator program
+ * @details The generator program will try to open the already initialised shared memory and semaphores
+ *          and then tries to find a 3coloring solution to the giphen graph. If it finds a solution it writes
+ *          it to the circular buffer inside of the shared memory space.
+ *
+ **/
+
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -15,12 +28,29 @@
 
 #include "commons.h"
 
+/**
+ * Program name
+ * @brief Pointer to the program name string
+ */
 const char *PROGRAM_NAME;
+
+/**
+ * Quit signal recieved
+ * @brief Boolean to store if a quit singnal was recieved. Has to be completely asynchronous save.
+ */
 volatile sig_atomic_t quitSignalRecieved = false;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
 
+/**
+ * Loggin function for errors
+ * 
+ * @brief This function writes a given formatted message to stderr and exits with EXIT_FAILURE
+ * 
+ * @param output Formatted output string
+ * @param ... Fomat elements
+ */
 static void printStderrAndExit(const char *output, ...) {
     va_list args;
     va_start(args, output);
@@ -32,6 +62,12 @@ static void printStderrAndExit(const char *output, ...) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Util
 
+/**
+ * Mandatory usage function
+ * 
+ * @brief This function writes helpful usage information about the program to stderr and exits with EXIT_FAILURE
+ * @details global variables: PROGRAM_NAME 
+ */
 static void printUsageAndExit(void) {
     printStderrAndExit("Usage: %s EDGE1...\nEdges: {node1}-{node2}", PROGRAM_NAME);
 }
@@ -39,6 +75,16 @@ static void printUsageAndExit(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Argument parsing
 
+/**
+ * Parse arguments function
+ * 
+ * @brief This function parses the arguments given to the program via argc and argv. If something is not right it prints an eror message and exits with EXIT_FAILURE
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @param argc The argument counter
+ * @param argv The argument vector
+ * @return A pointer to an allocated two dimensional array of the edges in the graph
+ */
 static long** parseArguments(int argc, char **argv) {
     if(argc <= 1) {
         printUsageAndExit();
@@ -120,6 +166,12 @@ static long** parseArguments(int argc, char **argv) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Shared memory
 
+/**
+ * @brief Umaps the shared memory circular buffer
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @param circularBufferData pointer to the mapped shared memory circular buffer
+ */
 static void closeSHM(circular_buffer_data_t* circularBufferData) {
     if(circularBufferData != NULL) {
         if(munmap(circularBufferData, sizeof(circular_buffer_data_t)) == -1) {
@@ -128,6 +180,13 @@ static void closeSHM(circular_buffer_data_t* circularBufferData) {
     }
 }
 
+/**
+ * @brief Opens a shared memory space, maps it to a variable, closes the fileDescriptor and returns a pointer to that object.
+ *        If something fails it closes already open resources and outputs an error.
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @return A pointer to the mapped shared memory circular buffer
+ */
 static circular_buffer_data_t* openSHM(void) {
     int sharedMemoryFd;
     if((sharedMemoryFd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0600)) == -1) {
@@ -155,6 +214,12 @@ static circular_buffer_data_t* openSHM(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Semaphores
 
+/**
+ * @brief Closes the open semaphores given with semaphoreCollection
+ * @details global variables: PROGRAM_NAME
+ * 
+ * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
+ */
 static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
     // TODO: This has a problem: Whe one close fails it doesnt close the other ones!!!
 
@@ -177,6 +242,12 @@ static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
     }
 }
 
+/**
+ * @brief Opens all neccessary semaphores and returns a collection of these semaphores as a semphore_collection_t object.
+ *        If something fails it automatically closes the semaphores and prints an error.
+ * 
+ * @return A collection of the opened semaphores as a semphore_collection_t object.
+ */
 static semaphore_colleciton_t openSEM(void) {
     semaphore_colleciton_t semaphoreCollection = {
         NULL,
@@ -204,10 +275,19 @@ static semaphore_colleciton_t openSEM(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Singnal handler
 
+/**
+ * @brief Function to handle singals
+ * 
+ * @param signal Signal that is being handles
+ */
 static void handleSignal(int signal) {
     quitSignalRecieved = true;
 }
 
+/**
+ * @brief Registers the signal handler for SIGINT and SIGTERM
+ * 
+ */
 static void registerSignalHandler(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -220,6 +300,17 @@ static void registerSignalHandler(void) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Cleanup
 
+/**
+ * @brief Cleans up everything there is to clean up.
+ *        It frees allocated memory and closes the shared memory as well as the semaphores
+ * 
+ * @param argc The argument count
+ * @param edges A pointer to an allocated two dimensional array of the edges in the graph
+ * @param nodesSize The size of the nodes array
+ * @param nodes A pointer to an allocated two dimensional array of the nodes together with their color
+ * @param circularBufferData pointer to the mapped shared memory circular buffer
+ * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
+ */
 static void cleanup(int argc, long **edges, size_t nodesSize, long **nodes, circular_buffer_data_t *circularBufferData, semaphore_colleciton_t *semaphoreCollection) {
     if(edges != NULL) {
         for(int x = 0; x < (argc - 1); ++x) {
@@ -246,6 +337,13 @@ static void cleanup(int argc, long **edges, size_t nodesSize, long **nodes, circ
 // ---------------------------------------------------------------------------------------------------------------------
 // Main
 
+/**
+ * @brief Program entry point
+ * 
+ * @param argc The argument counter
+ * @param argv The argument vector
+ * @return Returns EXIT_SUCCESS on program success
+ */
 int main(int argc, char **argv) {
     registerSignalHandler();
     PROGRAM_NAME = argv[0];
@@ -256,6 +354,7 @@ int main(int argc, char **argv) {
     circular_buffer_data_t *circularBufferData = openSHM();
     semaphore_colleciton_t semaphoreCollection = openSEM();
 
+    // Initialise the nodes array to contain all nodes and colors
     long** nodes;
     size_t nodesSize = 16;
     if((nodes = malloc(sizeof(long*) * nodesSize)) == NULL) {
@@ -266,6 +365,7 @@ int main(int argc, char **argv) {
         nodes[i] = NULL;
     }
 
+    // Extract all node into the nodes array
     for(int i = 0; i < argc - 1; ++i) {
         for(int a = 0; a < 2; ++a) {
             int x;
