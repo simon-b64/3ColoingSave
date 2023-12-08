@@ -64,7 +64,7 @@ semaphore_colleciton_t semaphoreCollection = {
     NULL,
 };
 
-static void cleanup();
+static void cleanup(void);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
@@ -200,7 +200,7 @@ static program_parameters_t parseArguments(int argc, char **argv) {
  * 
  * @param circularBufferData pointer to the mapped shared memory circular buffer
  */
-static int closeSHM() {
+static int closeSHM(void) {
     int returnValue = 0;
 
     if(circularBufferData != NULL) {
@@ -273,7 +273,7 @@ static void openSHM(void) {
  * 
  * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
  */
-static int closeSEM() {
+static int closeSEM(void) {
     int returnValue = 0;
 
     if(semaphoreCollection.rSem != NULL) {
@@ -376,7 +376,7 @@ static void registerSignalHandler(void) {
  * @param circularBufferData pointer to the mapped shared memory circular buffer
  * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
  */
-static void cleanup() {
+static void cleanup(void) {
     bool error = false;
     if(circularBufferData != NULL && semaphoreCollection.wSem != NULL) {
         circularBufferData -> stopGenerators = true;

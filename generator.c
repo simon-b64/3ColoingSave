@@ -40,6 +40,15 @@ const char *PROGRAM_NAME;
  */
 volatile sig_atomic_t quitSignalRecieved = false;
 
+circular_buffer_data_t *circularBufferData = NULL;
+semaphore_colleciton_t semaphoreCollection = {
+    NULL,
+    NULL,
+    NULL,
+};
+
+static void cleanup(void);
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Logging
 
@@ -51,11 +60,12 @@ volatile sig_atomic_t quitSignalRecieved = false;
  * @param output Formatted output string
  * @param ... Fomat elements
  */
-static void printStderrAndExit(const char *output, ...) {
+static void printStderrCleaupAndExit(const char *output, ...) {
     va_list args;
     va_start(args, output);
     vfprintf(stderr, output, args);
     va_end(args);
+    cleanup();
     exit(EXIT_FAILURE);
 }
 
@@ -69,7 +79,7 @@ static void printStderrAndExit(const char *output, ...) {
  * @details global variables: PROGRAM_NAME 
  */
 static void printUsageAndExit(void) {
-    printStderrAndExit("Usage: %s EDGE1...\nEdges: {node1}-{node2}", PROGRAM_NAME);
+    printStderrCleaupAndExit("Usage: %s EDGE1...\nEdges: {node1}-{node2}", PROGRAM_NAME);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -92,71 +102,43 @@ static long** parseArguments(int argc, char **argv) {
 
     long **buffer;
     if((buffer = malloc(sizeof(long*) * (argc - 1))) == NULL) {
-        printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+        printStderrCleaupAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
     }
     for(int i = 0; i < (argc - 1); ++i) {
         if((buffer[i] = malloc(sizeof(long) * 2)) == NULL) {
-            for(int x = 0; x < (argc - 1); ++x) {
-                free(buffer[x]);
-            } 
-            free(buffer);
-            printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+            printStderrCleaupAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
         }
     }
 
     for(int i = 1; i < argc; ++i) {
         char *numb = strtok(argv[i], "-");
         if(numb == NULL) {
-            for(int x = 0; x < (argc - 1); ++x) {
-                free(buffer[x]);
-            } 
-            free(buffer);
-            printStderrAndExit("[%s] ERROR: Could not parse edge %d: %s\n", PROGRAM_NAME, i, argv[i]);
+            printStderrCleaupAndExit("[%s] ERROR: Could not parse edge %d: %s\n", PROGRAM_NAME, i, argv[i]);
         }
         char *endptr = NULL;
         buffer[i - 1][0] = strtol(numb, &endptr, 10);
         if(buffer[i - 1][0] == LONG_MIN || buffer[i - 1][0] == LONG_MAX) {
             if(errno == ERANGE) {
-                for(int x = 0; x < (argc - 1); ++x) {
-                    free(buffer[x]);
-                } 
-                free(buffer);
-                printStderrAndExit("[%s] ERROR: Converting long failed: %s\n", PROGRAM_NAME, strerror(errno));
+                printStderrCleaupAndExit("[%s] ERROR: Converting long failed: %s\n", PROGRAM_NAME, strerror(errno));
             }
         }
         if (endptr == optarg) {
-            for(int x = 0; x < (argc - 1); ++x) {
-                free(buffer[x]);
-            } 
-            free(buffer);
-            printStderrAndExit("[%s] ERROR: No digits were found in the first node: %s\n", PROGRAM_NAME, errno);
+            printStderrCleaupAndExit("[%s] ERROR: No digits were found in the first node: %s\n", PROGRAM_NAME, errno);
         }
 
         numb = strtok(NULL, "-");
         if(numb == NULL) {
-            for(int x = 0; x < (argc - 1); ++x) {
-                free(buffer[x]);
-            } 
-            free(buffer);
-            printStderrAndExit("[%s] ERROR: Could not parse edge %d: %s\n", PROGRAM_NAME, i, argv[i]);
+            printStderrCleaupAndExit("[%s] ERROR: Could not parse edge %d: %s\n", PROGRAM_NAME, i, argv[i]);
         }
         endptr = NULL;
         buffer[i - 1][1] = strtol(numb, &endptr, 10);
         if(buffer[i - 1][1] == LONG_MIN || buffer[i - 1][1] == LONG_MAX) {
             if(errno == ERANGE) {
-                for(int x = 0; x < (argc - 1); ++x) {
-                    free(buffer[x]);
-                } 
-                free(buffer);
-                printStderrAndExit("[%s] ERROR: Converting long failed: %s\n", PROGRAM_NAME, strerror(errno));
+                printStderrCleaupAndExit("[%s] ERROR: Converting long failed: %s\n", PROGRAM_NAME, strerror(errno));
             }
         }
         if (endptr == optarg) {
-            for(int x = 0; x < (argc - 1); ++x) {
-                free(buffer[x]);
-            } 
-            free(buffer);
-            printStderrAndExit("[%s] ERROR: No digits were found in the first node: %s\n", PROGRAM_NAME, errno);
+            printStderrCleaupAndExit("[%s] ERROR: No digits were found in the first node: %s\n", PROGRAM_NAME, errno);
         }
     }
     
@@ -172,12 +154,14 @@ static long** parseArguments(int argc, char **argv) {
  * 
  * @param circularBufferData pointer to the mapped shared memory circular buffer
  */
-static void closeSHM(circular_buffer_data_t* circularBufferData) {
+static int closeSHM(void) {
     if(circularBufferData != NULL) {
         if(munmap(circularBufferData, sizeof(circular_buffer_data_t)) == -1) {
-            printStderrAndExit("[%s] ERROR: Failed to unmap shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+            fprintf(stderr, "[%s] ERROR: Failed to unmap shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+            return -1;
         }
     }
+    return 0;
 }
 
 /**
@@ -187,28 +171,25 @@ static void closeSHM(circular_buffer_data_t* circularBufferData) {
  * 
  * @return A pointer to the mapped shared memory circular buffer
  */
-static circular_buffer_data_t* openSHM(void) {
-    int sharedMemoryFd;
-    if((sharedMemoryFd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0600)) == -1) {
-        printStderrAndExit("[%s] ERROR: Failed to open shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+static void openSHM(void) {
+    if(circularBufferData != NULL) {
+        return;
     }
 
-    circular_buffer_data_t *circularBufferData;
+    int sharedMemoryFd;
+    if((sharedMemoryFd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0600)) == -1) {
+        printStderrCleaupAndExit("[%s] ERROR: Failed to open shared memory: %s\n", PROGRAM_NAME, strerror(errno));
+    }
+
     circularBufferData = mmap(NULL, sizeof(circular_buffer_data_t), PROT_READ | PROT_WRITE, MAP_SHARED, sharedMemoryFd, 0);
 
     if(circularBufferData == MAP_FAILED) {
-        fprintf(stderr, "[%s] ERROR: Failed to map shared memory: %s\n", PROGRAM_NAME, strerror(errno));
-        closeSHM(NULL);
-        exit(EXIT_FAILURE);
+        printStderrCleaupAndExit("[%s] ERROR: Failed to map shared memory: %s\n", PROGRAM_NAME, strerror(errno));
     }
 
     if(close(sharedMemoryFd) == -1) {
-        fprintf(stderr, "[%s] ERROR: Failed to close shared memory file descriptor: %s\n", PROGRAM_NAME, strerror(errno));
-        closeSHM(circularBufferData);
-        exit(EXIT_FAILURE);
+        printStderrCleaupAndExit("[%s] ERROR: Failed to close shared memory file descriptor: %s\n", PROGRAM_NAME, strerror(errno));
     }
-
-    return circularBufferData;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -220,26 +201,31 @@ static circular_buffer_data_t* openSHM(void) {
  * 
  * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
  */
-static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
-    // TODO: This has a problem: Whe one close fails it doesnt close the other ones!!!
+static int closeSEM(void) {
+    int returnValue = 0;
 
-    if(semaphoreCollection -> rSem != NULL) {
-        if(sem_close(semaphoreCollection -> rSem) == -1) {
-            printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+    if(semaphoreCollection.rSem != NULL) {
+        if(sem_close(semaphoreCollection.rSem) == -1) {
+            fprintf(stderr, "[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+            returnValue = -1;
         }
     }
 
-    if(semaphoreCollection -> wSem != NULL) {
-        if(sem_close(semaphoreCollection -> wSem) == -1) {
-            printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+    if(semaphoreCollection.wSem != NULL) {
+        if(sem_close(semaphoreCollection.wSem) == -1) {
+            fprintf(stderr, "[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+            returnValue = -1;
         }
     }
 
-    if(semaphoreCollection -> wSyncSem != NULL) {
-        if(sem_close(semaphoreCollection -> wSyncSem) == -1) {
-            printStderrAndExit("[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+    if(semaphoreCollection.wSyncSem != NULL) {
+        if(sem_close(semaphoreCollection.wSyncSem) == -1) {
+            fprintf(stderr, "[%s] ERROR: Failed to close semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+            returnValue = -1;
         }
     }
+
+    return returnValue;
 }
 
 /**
@@ -248,28 +234,18 @@ static void closeSEM(semaphore_colleciton_t* semaphoreCollection) {
  * 
  * @return A collection of the opened semaphores as a semphore_collection_t object.
  */
-static semaphore_colleciton_t openSEM(void) {
-    semaphore_colleciton_t semaphoreCollection = {
-        NULL,
-        NULL,
-        NULL,
-    };
-
+static void openSEM(void) {
     if((semaphoreCollection.rSem = sem_open(R_SEM_NAME, 0)) == SEM_FAILED) {
-        printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        printStderrCleaupAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
     }
 
     if((semaphoreCollection.wSem = sem_open(W_SEM_NAME, 0)) == SEM_FAILED) {
-        closeSEM(&semaphoreCollection);
-        printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        printStderrCleaupAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
     }
 
     if((semaphoreCollection.wSyncSem = sem_open(W_SEM_SYNC_NAME, 0)) == SEM_FAILED) {
-        closeSEM(&semaphoreCollection);
-        printStderrAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
+        printStderrCleaupAndExit("[%s] ERROR: Failed to open semaphores: %s\n", PROGRAM_NAME, strerror(errno));
     }
-
-    return semaphoreCollection;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -311,7 +287,22 @@ static void registerSignalHandler(void) {
  * @param circularBufferData pointer to the mapped shared memory circular buffer
  * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
  */
-static void cleanup(int argc, long **edges, size_t nodesSize, long **nodes, circular_buffer_data_t *circularBufferData, semaphore_colleciton_t *semaphoreCollection) {
+static void cleanup() {
+    bool error = false;
+
+    if(closeSHM() == -1) {
+        error = true;
+    }
+    if(closeSEM() == -1) {
+        error = true;
+    }
+
+    if(error) {
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void freeAllocatedResources(int argc, long **edges, size_t nodesSize, long **nodes) {
     if(edges != NULL) {
         for(int x = 0; x < (argc - 1); ++x) {
             free(edges[x]);
@@ -329,9 +320,6 @@ static void cleanup(int argc, long **edges, size_t nodesSize, long **nodes, circ
         free(nodes);
         nodes = NULL;
     }
-    
-    closeSHM(circularBufferData);
-    closeSEM(semaphoreCollection);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -351,15 +339,15 @@ int main(int argc, char **argv) {
 
     long **edges = parseArguments(argc, argv);
 
-    circular_buffer_data_t *circularBufferData = openSHM();
-    semaphore_colleciton_t semaphoreCollection = openSEM();
+    openSHM();
+    openSEM();
 
     // Initialise the nodes array to contain all nodes and colors
     long** nodes;
     size_t nodesSize = 16;
     if((nodes = malloc(sizeof(long*) * nodesSize)) == NULL) {
-        cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-        printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+        freeAllocatedResources(argc, edges, nodesSize, nodes);
+        printStderrCleaupAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
     }
     for(int i = 0; i < nodesSize; ++i) {
         nodes[i] = NULL;
@@ -372,8 +360,8 @@ int main(int argc, char **argv) {
             for(x = 0; x < nodesSize; ++x) {
                 if(nodes[x] == NULL) {
                     if((nodes[x] = malloc(sizeof(long) * 2)) == NULL) {
-                        cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-                        printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+                        freeAllocatedResources(argc, edges, nodesSize, nodes);
+                        printStderrCleaupAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
                     }
                     nodes[x][0] = edges[i][a];
                     nodes[x][1] = 0;
@@ -386,15 +374,15 @@ int main(int argc, char **argv) {
             if(x == nodesSize) {
                 nodesSize *= 2;
                 if((nodes = realloc(nodes, sizeof(long*) * nodesSize)) == NULL) {
-                    cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-                    printStderrAndExit("[%s] ERROR: Failed to reallocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+                    freeAllocatedResources(argc, edges, nodesSize, nodes);
+                    printStderrCleaupAndExit("[%s] ERROR: Failed to reallocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
                 }
                 for(int y = nodesSize / 2; y < nodesSize; ++y) {
                     nodes[y] = NULL;
                 }
                 if((nodes[nodesSize / 2] = malloc(sizeof(long) * 2)) == NULL) {
-                    cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-                    printStderrAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
+                    freeAllocatedResources(argc, edges, nodesSize, nodes);
+                    printStderrCleaupAndExit("[%s] ERROR: Failed to allocate buffer: %s\n", PROGRAM_NAME, strerror(errno));
                 }
                 nodes[nodesSize / 2][0] = edges[i][a];
                 nodes[nodesSize / 2][1] = 0;
@@ -438,9 +426,8 @@ int main(int argc, char **argv) {
             }
 
             if(index1 == -1 || index2 == -1) {
-                // ERROR out since this should never happen
-                cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-                printStderrAndExit("[%s] ERROR: There is an unmapped node!\n", PROGRAM_NAME);
+                freeAllocatedResources(argc, edges, nodesSize, nodes);
+                printStderrCleaupAndExit("[%s] ERROR: There is an unmapped node!\n", PROGRAM_NAME);
             }
 
             if(nodes[index1][1] == nodes[index2][1]){
@@ -461,20 +448,20 @@ int main(int argc, char **argv) {
             if(errno == EINTR) {
                 continue;
             }
-            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-            printStderrAndExit("[%s] ERROR: There was an error waiting the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+            freeAllocatedResources(argc, edges, nodesSize, nodes);
+            printStderrCleaupAndExit("[%s] ERROR: There was an error waiting the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
         }
 
         if(sem_wait(semaphoreCollection.wSem) == -1) {
             if(sem_post(semaphoreCollection.wSyncSem) == -1) {
-                cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-                printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+                freeAllocatedResources(argc, edges, nodesSize, nodes);
+                printStderrCleaupAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
             }
             if(errno == EINTR) {   
                 continue;
             }
-            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-            printStderrAndExit("[%s] ERROR: There was an error waiting the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+            freeAllocatedResources(argc, edges, nodesSize, nodes);
+            printStderrCleaupAndExit("[%s] ERROR: There was an error waiting the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
         }
 
         for(int i = 0; i < MAX_NUM_EDGES_RESULT_SET; ++i) {
@@ -486,17 +473,18 @@ int main(int argc, char **argv) {
         circularBufferData -> writePos = circularBufferData -> writePos % MAX_NUM_RESULT_SETS;
 
         if(sem_post(semaphoreCollection.rSem) == -1) {
-            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+            freeAllocatedResources(argc, edges, nodesSize, nodes);
+            printStderrCleaupAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
         }
 
         if(sem_post(semaphoreCollection.wSyncSem) == -1) {
-            cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
-            printStderrAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
+            freeAllocatedResources(argc, edges, nodesSize, nodes);
+            printStderrCleaupAndExit("[%s] ERROR: There was an error pushing the semaphore: %s\n", PROGRAM_NAME, strerror(errno));
         }
     }
 
-    cleanup(argc, edges, nodesSize, nodes, circularBufferData, &semaphoreCollection);
+    freeAllocatedResources(argc, edges, nodesSize, nodes);
+    cleanup();
 
     return EXIT_SUCCESS;
 }
