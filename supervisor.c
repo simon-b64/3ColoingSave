@@ -51,8 +51,7 @@ static const char *PROGRAM_NAME;
 volatile sig_atomic_t quitSignalRecieved = false;
 
 // TODO:
-// Write useful coments
-// Doxygen documentation
+// Alle kommentare & doxygen überarbeiten
 // Check if you reinvent the wheel somewhere
 // NAME OF CONSTANTS IN UPPERCASE
 // Use meaningful variable and constant names
