@@ -40,13 +40,23 @@ const char *PROGRAM_NAME;
  */
 volatile sig_atomic_t quitSignalRecieved = false;
 
+/**
+ * @brief Pointer to the mapped shared memory location. Null if not mapped
+*/
 circular_buffer_data_t *circularBufferData = NULL;
+
+/**
+ * @brief Collection of sem_t pointers for all relevant semaphores
+ */
 semaphore_colleciton_t semaphoreCollection = {
     NULL,
     NULL,
     NULL,
 };
 
+/**
+ * @brief Function declaration of cleanup function which tries to deallcoate all allocated resources
+ */
 static void cleanup(void);
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -150,7 +160,7 @@ static long** parseArguments(int argc, char **argv) {
 
 /**
  * @brief Umaps the shared memory circular buffer
- * @details global variables: PROGRAM_NAME
+ * @details global variables: PROGRAM_NAME, circularBufferData
  * 
  * @param circularBufferData pointer to the mapped shared memory circular buffer
  */
@@ -165,11 +175,9 @@ static int closeSHM(void) {
 }
 
 /**
- * @brief Opens a shared memory space, maps it to a variable, closes the fileDescriptor and returns a pointer to that object.
- *        If something fails it closes already open resources and outputs an error.
- * @details global variables: PROGRAM_NAME
- * 
- * @return A pointer to the mapped shared memory circular buffer
+ * @brief Opens a shared memory space, maps it to an addressspace, closes the fileDescriptor and sets the global pointer to that address space.
+ *        If something fails it tires to close already open resources and outputs an error.
+ * @details global variables: PROGRAM_NAME, circularBufferData
  */
 static void openSHM(void) {
     if(circularBufferData != NULL) {
@@ -196,10 +204,8 @@ static void openSHM(void) {
 // Semaphores
 
 /**
- * @brief Closes the open semaphores given with semaphoreCollection
- * @details global variables: PROGRAM_NAME
- * 
- * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
+ * @brief Closes the open semaphores inside semaphoreCollection
+ * @details global variables: PROGRAM_NAME, semaphoreCollection
  */
 static int closeSEM(void) {
     int returnValue = 0;
@@ -229,10 +235,9 @@ static int closeSEM(void) {
 }
 
 /**
- * @brief Opens all neccessary semaphores and returns a collection of these semaphores as a semphore_collection_t object.
- *        If something fails it automatically closes the semaphores and prints an error.
- * 
- * @return A collection of the opened semaphores as a semphore_collection_t object.
+ * @brief Opens all neccessary semaphores and fills the global collection with pointers to these semaphores.
+ *        If something fails it automatically tries to close all allocated resources and prints an error.
+ * @details global variables: PROGRAM_NAME, semaphoreCollection
  */
 static void openSEM(void) {
     if((semaphoreCollection.rSem = sem_open(R_SEM_NAME, 0)) == SEM_FAILED) {
@@ -253,6 +258,7 @@ static void openSEM(void) {
 
 /**
  * @brief Function to handle singals
+ * @details global variables: quitSignalRecieved
  * 
  * @param signal Signal that is being handles
  */
@@ -277,15 +283,8 @@ static void registerSignalHandler(void) {
 // Cleanup
 
 /**
- * @brief Cleans up everything there is to clean up.
+ * @brief Tries to clean up every shared resource there is to clean up.
  *        It frees allocated memory and closes the shared memory as well as the semaphores
- * 
- * @param argc The argument count
- * @param edges A pointer to an allocated two dimensional array of the edges in the graph
- * @param nodesSize The size of the nodes array
- * @param nodes A pointer to an allocated two dimensional array of the nodes together with their color
- * @param circularBufferData pointer to the mapped shared memory circular buffer
- * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
  */
 static void cleanup() {
     bool error = false;
@@ -302,6 +301,14 @@ static void cleanup() {
     }
 }
 
+/**
+ * @brief Frees the two allocated memory spaces of edges and nodes
+ * 
+ * @param argc The argument count
+ * @param edges A pointer to an allocated two dimensional array of the edges in the graph
+ * @param nodesSize The size of the nodes array
+ * @param nodes A pointer to an allocated two dimensional array of the nodes together with their color
+ */
 static void freeAllocatedResources(int argc, long **edges, size_t nodesSize, long **nodes) {
     if(edges != NULL) {
         for(int x = 0; x < (argc - 1); ++x) {
@@ -327,6 +334,7 @@ static void freeAllocatedResources(int argc, long **edges, size_t nodesSize, lon
 
 /**
  * @brief Program entry point
+ * @details global variables: PROGRAM_NAME, semaphoreCollection, circularBufferData, quitSignalRecieved
  * 
  * @param argc The argument counter
  * @param argv The argument vector

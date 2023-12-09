@@ -56,7 +56,14 @@ volatile sig_atomic_t quitSignalRecieved = false;
 // NAME OF CONSTANTS IN UPPERCASE
 // Use meaningful variable and constant names
 
+/**
+ * @brief Pointer to the mapped shared memory location. Null if not mapped
+*/
 circular_buffer_data_t *circularBufferData = NULL;
+
+/**
+ * @brief Collection of sem_t pointers for all relevant semaphores
+ */
 semaphore_colleciton_t semaphoreCollection = {
     NULL,
     NULL,
@@ -195,7 +202,7 @@ static program_parameters_t parseArguments(int argc, char **argv) {
 
 /**
  * @brief Umaps the shared memory circular buffer and unlinks the shared memory
- * @details global variables: PROGRAM_NAME
+ * @details global variables: PROGRAM_NAME, circularBufferData
  * 
  * @param circularBufferData pointer to the mapped shared memory circular buffer
  */
@@ -222,11 +229,9 @@ static int closeSHM(void) {
 
 /**
  * @brief Opens a shared memory space, trucates it to the size of the circular_buffer_data_t object, 
- *        maps it to a variable, closes the fileDescriptor, intialises the circular buffer object and returns a pointer to that object.
- *        If something fails it closes already open resources and outputs an error.
- * @details global variables: PROGRAM_NAME
- * 
- * @return A pointer to the mapped shared memory circular buffer
+ *        maps it to an addressspace, closes the fileDescriptor, intialises the circular buffer object and sets the global pointer to that address space.
+ *        If something fails it tries to close already opened resources and outputs an error.
+ * @details global variables: PROGRAM_NAME, circularBufferData
  */
 static void openSHM(void) {
     if(circularBufferData != NULL) {
@@ -267,10 +272,8 @@ static void openSHM(void) {
 // Semaphores
 
 /**
- * @brief Closes and unlinks the open semaphores given with semaphoreCollection
- * @details global variables: PROGRAM_NAME
- * 
- * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
+ * @brief Closes and unlinks the open semaphores in the semaphoreCollection
+ * @details global variables: PROGRAM_NAME, semaphoreCollection
  */
 static int closeSEM(void) {
     int returnValue = 0;
@@ -321,10 +324,9 @@ static int closeSEM(void) {
 }
 
 /**
- * @brief Creates and opens all neccessary semaphores and returns a collection of these semaphores as a semphore_collection_t object.
- *        If something fails it automatically closes the semaphores and prints an error.
- * 
- * @return A collection of the opened semaphores as a semphore_collection_t object.
+ * @brief Creates and opens all neccessary semaphores and fills the global collection with pointers of these semaphores.
+ *        If something fails it automatically tries to close allocated resources and prints an error.
+ * @details global variables: PROGRAM_NAME, semaphoreCollection
  */
 static void openSEM(void) {
     if((semaphoreCollection.rSem = sem_open(R_SEM_NAME, O_CREAT | O_EXCL, 0600, 0)) == SEM_FAILED) {
@@ -345,6 +347,7 @@ static void openSEM(void) {
 
 /**
  * @brief Function to handle singals
+ * @details global variables: quitSignalRecieved
  * 
  * @param signal Signal that is being handles
  */
@@ -371,9 +374,8 @@ static void registerSignalHandler(void) {
 /**
  * @brief Cleans up everything there is to clean up.
  *        It stops the generators and closes the shared memory as well as the semaphores
+ * @details circularBufferData, PROGRAM_NAME
  * 
- * @param circularBufferData pointer to the mapped shared memory circular buffer
- * @param semaphoreCollection pointer to a semaphore_collection_t containing the semaphores to close
  */
 static void cleanup(void) {
     bool error = false;
@@ -412,6 +414,7 @@ static void cleanup(void) {
 
 /**
  * @brief Program entry point
+ * @details global variables: PROGRAM_NAME, semaphoreCollection, circularBufferData, quitSignalRecieved
  * 
  * @param argc The argument counter
  * @param argv The argument vector
