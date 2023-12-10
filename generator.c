@@ -32,23 +32,23 @@
  * Program name
  * @brief Pointer to the program name string
  */
-const char *PROGRAM_NAME;
+static const char *PROGRAM_NAME;
 
 /**
  * Quit signal recieved
  * @brief Boolean to store if a quit singnal was recieved. Has to be completely asynchronous save.
  */
-volatile sig_atomic_t quitSignalRecieved = false;
+static volatile sig_atomic_t quitSignalRecieved = false;
 
 /**
  * @brief Pointer to the mapped shared memory location. Null if not mapped
 */
-circular_buffer_data_t *circularBufferData = NULL;
+static circular_buffer_data_t *circularBufferData = NULL;
 
 /**
  * @brief Collection of sem_t pointers for all relevant semaphores
  */
-semaphore_colleciton_t semaphoreCollection = {
+static semaphore_colleciton_t semaphoreCollection = {
     NULL,
     NULL,
     NULL,

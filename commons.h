@@ -18,6 +18,7 @@
 #define W_SEM_SYNC_NAME MAT_NUMMER_PREFIX "W_SEM_SYNC"
 
 #include <semaphore.h>
+#include <stdbool.h>
 
 #define MAX_NUM_RESULT_SETS 10
 #define MAX_NUM_EDGES_RESULT_SET 10
